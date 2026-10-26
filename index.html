@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi K3.1 Pro vs GPT-6 Astra</title>
+<style>
+  :root { --bg: #0b0d14; --card: #141826; --text: #e9ecf5; --muted: #8d94ab; --kimi: #3fd0c9; --astra: #ff5fa2; --line: #232a3d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .test { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .test h2 { font-size: 18px; margin: 0 0 4px; }
+  .test p { color: var(--muted); margin: 0 0 14px; font-size: 14px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .col { border-radius: 8px; padding: 12px; background: #0f1320; }
+  .col b { display: block; margin-bottom: 8px; }
+  .astra b { color: var(--astra); } .kimi b { color: var(--kimi); }
+  a { color: var(--text); } .links a { display: inline-block; margin: 0 12px 6px 0; }
+  video, img { width: 100%; border-radius: 6px; display: block; margin-top: 8px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+  @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kimi K3.1 Pro vs GPT-6 Astra</h1>
+  <p class="sub">Same prompts, each model in its own agent. Play the games and dioramas right here. <a href="https://github.com/KostiKoNeuro/kimi-vs-astra">Prompts, scenes and costs on GitHub</a>.</p>
+
+  <section class="test">
+    <h2>1 · Neon Night Racer</h2>
+    <p>An 80s arcade racer built from one prompt. Arrows / WASD to drive.</p>
+    <div class="cols">
+      <div class="col astra"><b>GPT-6 Astra</b><div class="links"><a href="1-race/astra/">Play</a></div></div>
+      <div class="col kimi"><b>Kimi K3.1 Pro</b><div class="links"><a href="1-race/kimi/">Play</a></div></div>
+    </div>
+  </section>
+
+  <section class="test">
+    <h2>2a · Night market voxel diorama</h2>
+    <p>Everything built from cubes in code. 30-second fly-through on open; press C for a free camera.</p>
+    <div class="cols">
+      <div class="col astra"><b>GPT-6 Astra</b><div class="links"><a href="2a-diorama/astra/">Open</a></div></div>
+      <div class="col kimi"><b>Kimi K3.1 Pro</b><div class="links"><a href="2a-diorama/kimi/">Open</a></div></div>
+    </div>
+  </section>
+
+  <section class="test">
+    <h2>2b · The same diorama in Blender</h2>
+    <p>Next message: rebuild your own diorama as an animated Blender scene and render 10 seconds.</p>
+    <div class="cols">
+      <div class="col astra"><b>GPT-6 Astra</b><video src="2b-blender/astra/flythrough.mp4" controls muted loop playsinline preload="metadata"></video><div class="links"><a href="2b-blender/astra/browser-vs-blender.png">Browser vs Blender</a><a href="2b-blender/astra/night_market.blend">.blend</a></div></div>
+      <div class="col kimi"><b>Kimi K3.1 Pro</b><video src="2b-blender/kimi/flythrough.mp4" controls muted loop playsinline preload="metadata"></video><div class="links"><a href="2b-blender/kimi/browser-vs-blender.png">Browser vs Blender</a><a href="2b-blender/kimi/night_market.blend">.blend</a></div></div>
+    </div>
+  </section>
+
+  <section class="test">
+    <h2>3 · Channel intro (OpenMontage)</h2>
+    <p>v1 without paid generation · v2 the models added only music · v3 with generated images.</p>
+    <div class="cols">
+      <div class="col astra"><b>GPT-6 Astra</b><video src="3-intro/astra/v3.mp4" controls playsinline preload="metadata"></video><div class="links"><a href="3-intro/astra/v1.mp4">v1</a><a href="3-intro/astra/v2.mp4">v2</a><a href="3-intro/astra/v3.mp4">v3</a></div></div>
+      <div class="col kimi"><b>Kimi K3.1 Pro</b><video src="3-intro/kimi/v3.mp4" controls playsinline preload="metadata"></video><div class="links"><a href="3-intro/kimi/v1.mp4">v1</a><a href="3-intro/kimi/v2.mp4">v2</a><a href="3-intro/kimi/v3.mp4">v3</a></div></div>
+    </div>
+  </section>
+
+  <footer>Made for the YouTube channel «Ботанутый Костя» · <a href="https://t.me/kostik_neuro">Telegram</a> · In partnership with Kimi; scores and opinions are my own.</footer>
+</main>
+</body>
+</html>

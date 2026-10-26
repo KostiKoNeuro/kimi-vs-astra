@@ -1,0 +1,1237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070d18">
+  <link rel="icon" href="data:,">
+  <title>Shenzhen · After the Rain</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #070d18; }
+    body { color: #d4e6e9; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+    #orbit-help {
+      position: fixed; left: 28px; bottom: 25px; z-index: 2; pointer-events: none;
+      padding-left: 13px; border-left: 2px solid #ff9860; color: #aac0cb;
+      letter-spacing: .07em; opacity: 0; transition: opacity .5s; user-select: none;
+    }
+    #orbit-help.visible { opacity: 1; }
+    #orbit-help strong { display: block; color: #f0dfc6; font-size: 10px; font-weight: 500; letter-spacing: .2em; }
+    #orbit-help span { display: block; margin-top: 3px; font-size: 10px; }
+    #failure { display: none; position: fixed; inset: 0; place-content: center; padding: 10vw; color: #f1c5a2; background: #070d18; }
+    #failure p { max-width: 480px; }
+  </style>
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}
+  </script>
+</head>
+<body>
+  <div id="orbit-help" aria-hidden="true"><strong>FREE EXPLORATION</strong><span>Drag to orbit · Scroll to zoom · Right-drag to pan · C to return</span></div>
+  <div id="failure" role="alert"><p>This little world needs WebGL and a connection to load Three.js. Try a current desktop browser, then reload the local HTTP page.</p></div>
+  <noscript>This diorama requires JavaScript.</noscript>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+    try {
+      const TAU = Math.PI * 2;
+      const LOOP_SECONDS = 30;
+      let seed = 48271;
+      const random = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+        return (seed >>> 0) / 4294967296;
+      };
+      const range = (a, b) => a + (b - a) * random();
+      const pick = values => values[Math.floor(random() * values.length)];
+      const wrap = (n, d = 1) => ((n % d) + d) % d;
+      const vec = (x, y, z) => new THREE.Vector3(x, y, z);
+      const colorCache = new Map();
+      const color = value => {
+        if (value?.isColor) return value;
+        if (!colorCache.has(value)) colorCache.set(value, new THREE.Color(value));
+        return colorCache.get(value);
+      };
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#070d18');
+      scene.fog = new THREE.FogExp2('#0a1522', 0.0105);
+      const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.08, 180);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.14;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.domElement.setAttribute('aria-label', 'A living voxel night market in Shenzhen. Press C to orbit freely.');
+      renderer.domElement.tabIndex = 0;
+      document.body.prepend(renderer.domElement);
+
+      const sky = new THREE.HemisphereLight('#7798c5', '#162130', 1.15);
+      scene.add(sky);
+      const moon = new THREE.DirectionalLight('#9ab8df', 2.15);
+      moon.position.set(-15, 28, 15);
+      moon.castShadow = true;
+      moon.shadow.mapSize.set(2048, 2048);
+      Object.assign(moon.shadow.camera, { left: -23, right: 23, top: 27, bottom: -20, near: 1, far: 75 });
+      moon.shadow.bias = -0.00035;
+      moon.shadow.normalBias = 0.045;
+      moon.shadow.radius = 3;
+      moon.target.position.set(0, 0, -1);
+      scene.add(moon, moon.target);
+      const rim = new THREE.DirectionalLight('#675ca0', 0.7);
+      rim.position.set(10, 16, -18);
+      scene.add(rim);
+      const frontFill = new THREE.DirectionalLight('#537e91', 0.35);
+      frontFill.position.set(0, 8, 20);
+      scene.add(frontFill);
+
+      const environmentScene = new THREE.Scene();
+      const environmentBox = new THREE.Mesh(
+        new THREE.BoxGeometry(90, 90, 90),
+        new THREE.MeshBasicMaterial({ color: '#142038', side: THREE.BackSide })
+      );
+      environmentScene.add(environmentBox);
+      const environmentPanels = [
+        [0, 32, 0, 35, 1, 35, '#799aba', 1.1],
+        [-24, 7, 0, 1, 12, 24, '#f09963', 1.2],
+        [24, 9, -5, 1, 16, 15, '#2a9caa', 1.0],
+        [0, 6, 27, 20, 8, 1, '#c95a55', 0.7]
+      ];
+      for (const [x, y, z, sx, sy, sz, tint, strength] of environmentPanels) {
+        const panel = new THREE.Mesh(
+          new THREE.BoxGeometry(sx, sy, sz),
+          new THREE.MeshBasicMaterial({ color: color(tint).clone().multiplyScalar(strength) })
+        );
+        panel.position.set(x, y, z);
+        environmentScene.add(panel);
+      }
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const environment = pmrem.fromScene(environmentScene, 0.08);
+      scene.environment = environment.texture;
+      scene.environmentIntensity = 0.55;
+      pmrem.dispose();
+      environmentScene.traverse(object => {
+        object.geometry?.dispose();
+        object.material?.dispose();
+      });
+
+      const cube = new THREE.BoxGeometry(1, 1, 1);
+      const matte = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const metal = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.36, metalness: 0.7 });
+      const road = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.24, metalness: 0.48, clearcoat: 0.85, clearcoatRoughness: 0.18, envMapIntensity: 0.75 });
+      const wet = new THREE.MeshPhysicalMaterial({ color: '#172d39', roughness: 0.075, metalness: 0.72, clearcoat: 1, clearcoatRoughness: 0.07, transparent: true, opacity: 0.68, depthWrite: false, envMapIntensity: 1.35 });
+      const emit = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+      const windows = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+      const lanternPaper = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, emissive: '#ff751d', emissiveIntensity: 1.2 });
+      const clockUniform = { value: 0 };
+      const reflection = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.48, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+      reflection.onBeforeCompile = shader => {
+        shader.uniforms.uMarketTime = clockUniform;
+        shader.vertexShader = 'varying vec3 vPuddlePosition;\n' + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+          #include <project_vertex>
+          vec4 puddlePosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            puddlePosition = instanceMatrix * puddlePosition;
+          #endif
+          vPuddlePosition = (modelMatrix * puddlePosition).xyz;
+        `);
+        shader.fragmentShader = 'uniform float uMarketTime;\nvarying vec3 vPuddlePosition;\n' + shader.fragmentShader;
+        shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+          #include <color_fragment>
+          vec2 p = vPuddlePosition.xz;
+          float warp = sin(p.x * 15.0 + p.y * 2.3 + uMarketTime * 0.7);
+          float broken = pow(0.5 + 0.5 * sin(p.y * 31.0 + warp * 1.8), 2.0);
+          float ripple = 0.75 + 0.25 * sin(p.x * 22.0 - p.y * 17.0 + uMarketTime * 1.1);
+          diffuseColor.a *= (0.22 + 0.78 * broken) * ripple;
+        `);
+      };
+      reflection.customProgramCacheKey = () => 'voxel-puddle-reflection-v1';
+      const flickers = [];
+      function flickerMaterial(tint, strength, phase) {
+        const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+        flickers.push({ material, base: color(tint).clone().multiplyScalar(strength), phase });
+        return material;
+      }
+      const materials = {
+        matte, metal, road, wet, emit, windows, lantern: lanternPaper, reflection,
+        neonRose: flickerMaterial('#ff3f65', 3.3, 0.2),
+        neonCyan: flickerMaterial('#40f5de', 2.6, 2.4),
+        neonAmber: flickerMaterial('#ffaf51', 3.0, 4.8)
+      };
+      const buckets = new Map();
+      const matrixObject = new THREE.Object3D();
+      const obstacles = [];
+      const staticMeshes = [];
+      let staticVoxelCount = 0;
+
+      function box(x, y, z, sx, sy, sz, tint = '#ffffff', kind = 'matte', rotation = null) {
+        if (sx <= 0 || sy <= 0 || sz <= 0) return;
+        if (!buckets.has(kind)) buckets.set(kind, []);
+        buckets.get(kind).push({ x, y, z, sx, sy, sz, tint, rotation });
+        staticVoxelCount++;
+      }
+      function obstacle(x, y, z, sx, sy, sz, name) {
+        obstacles.push(new THREE.Box3(vec(x - sx / 2 - 0.12, y - sy / 2 - 0.12, z - sz / 2 - 0.12), vec(x + sx / 2 + 0.12, y + sy / 2 + 0.12, z + sz / 2 + 0.12)));
+      }
+      function localBox(origin, x, y, z, sx, sy, sz, tint, kind = 'matte', angle = 0) {
+        const c = Math.cos(angle), s = Math.sin(angle);
+        box(origin.x + c * x + s * z, origin.y + y, origin.z - s * x + c * z, sx, sy, sz, tint, kind, [0, angle, 0]);
+      }
+      function beam(a, b, thickness, tint = '#111b27', kind = 'metal') {
+        const direction = b.clone().sub(a);
+        const length = direction.length();
+        if (length < 0.001) return;
+        const midpoint = a.clone().add(b).multiplyScalar(0.5);
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(vec(0, 1, 0), direction.normalize());
+        const euler = new THREE.Euler().setFromQuaternion(quaternion);
+        box(midpoint.x, midpoint.y, midpoint.z, thickness, length, thickness, tint, kind, [euler.x, euler.y, euler.z]);
+      }
+      function cable(a, b, sag, thickness = 0.035, tint = '#15212a', segments = 36) {
+        let previous = a;
+        for (let i = 1; i <= segments; i++) {
+          const t = i / segments;
+          const point = a.clone().lerp(b, t);
+          point.y -= Math.sin(t * Math.PI) * sag;
+          beam(previous, point, thickness, tint);
+          previous = point;
+        }
+      }
+      function buildBatches() {
+        for (const [kind, instances] of buckets) {
+          const mesh = new THREE.InstancedMesh(cube, materials[kind], instances.length);
+          mesh.name = `static-${kind}`;
+          for (let i = 0; i < instances.length; i++) {
+            const item = instances[i];
+            matrixObject.position.set(item.x, item.y, item.z);
+            matrixObject.scale.set(item.sx, item.sy, item.sz);
+            matrixObject.rotation.set(...(item.rotation || [0, 0, 0]));
+            matrixObject.updateMatrix();
+            mesh.setMatrixAt(i, matrixObject.matrix);
+            mesh.setColorAt(i, color(item.tint));
+          }
+          mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.instanceColor.needsUpdate = true;
+          mesh.castShadow = ['matte', 'metal', 'lantern'].includes(kind);
+          mesh.receiveShadow = ['matte', 'metal', 'road', 'lantern'].includes(kind);
+          mesh.computeBoundingSphere();
+          scene.add(mesh);
+          staticMeshes.push(mesh);
+        }
+      }
+
+      const font = {
+        A:['01110','11011','11011','11111','11011','11011','11011'],
+        B:['11110','11011','11011','11110','11011','11011','11110'],
+        C:['01111','11000','11000','11000','11000','11000','01111'],
+        D:['11110','11011','11011','11011','11011','11011','11110'],
+        E:['11111','11000','11000','11110','11000','11000','11111'],
+        F:['11111','11000','11000','11110','11000','11000','11000'],
+        G:['01111','11000','11000','11011','11011','11011','01111'],
+        H:['11011','11011','11011','11111','11011','11011','11011'],
+        I:['111','010','010','010','010','010','111'],
+        J:['00111','00011','00011','00011','11011','11011','01110'],
+        K:['11011','11010','11100','11100','11110','11011','11011'],
+        L:['11000','11000','11000','11000','11000','11000','11111'],
+        M:['10001','11011','11111','10101','10001','10001','10001'],
+        N:['11001','11101','11101','11011','11011','11011','11001'],
+        O:['01110','11011','11011','11011','11011','11011','01110'],
+        P:['11110','11011','11011','11110','11000','11000','11000'],
+        Q:['01110','11011','11011','11011','11111','01110','00011'],
+        R:['11110','11011','11011','11110','11100','11010','11011'],
+        S:['01111','11000','11000','01110','00011','00011','11110'],
+        T:['11111','00100','00100','00100','00100','00100','00100'],
+        U:['11011','11011','11011','11011','11011','11011','01110'],
+        V:['11011','11011','11011','11011','11011','01110','00100'],
+        W:['10001','10001','10101','10101','11111','11011','10001'],
+        X:['11011','11011','01110','00100','01110','11011','11011'],
+        Y:['11011','11011','11011','01110','00100','00100','00100'],
+        Z:['11111','00011','00110','00100','01100','11000','11111'],
+        '0':['01110','11011','11011','11011','11011','11011','01110'],
+        '1':['010','110','010','010','010','010','111'],
+        '2':['01110','11011','00011','00110','01100','11000','11111'],
+        '3':['11110','00011','00011','01110','00011','00011','11110'],
+        '4':['11011','11011','11011','11111','00011','00011','00011'],
+        '5':['11111','11000','11000','11110','00011','00011','11110'],
+        '6':['01111','11000','11000','11110','11011','11011','01110'],
+        '7':['11111','00011','00011','00110','00110','01100','01100'],
+        '8':['01110','11011','11011','01110','11011','11011','01110'],
+        '9':['01110','11011','11011','01111','00011','00011','11110'],
+        '+':['00000','00100','00100','11111','00100','00100','00000'],
+        '-':['00000','00000','00000','11111','00000','00000','00000'],
+        '.':['0','0','0','0','0','1','1'],
+        '/':['00001','00011','00110','00100','01100','11000','10000']
+      };
+      const chinese = {
+        '夜':['000100000','001111100','010101000','111111110','010101000','011111000','010110000','100101000','001001110'],
+        '市':['000100000','111111111','000100000','011111110','010101010','010101010','010101010','000100000','000100000'],
+        '小':['000100000','000100000','010100010','010100010','100100001','000100000','000100000','000100000','000100000'],
+        '吃':['000000000','111001111','101001001','101001001','111001111','000001000','000001111','000001001','000000111'],
+        '茶':['010000010','111111111','000100000','001010100','010101010','000100000','011111110','010101010','100100001'],
+        '串':['000100000','011111110','010100010','011111110','000100000','011111110','010100010','011111110','000100000'],
+        '深':['010011110','001010001','100011110','000010100','011111111','100010100','000111110','001010100','010010010'],
+        '圳':['010001001','111101101','010101101','011101101','110101101','010101101','010101101','010101111','010001000']
+      };
+      function text(value, x, y, z, unit, tint, kind = 'emit', angle = 0) {
+        const letters = [...value.toUpperCase()];
+        const width = letters.reduce((sum, letter) => sum + ((font[letter]?.[0].length || 3) + 1) * unit, -unit);
+        let cursor = -width / 2;
+        const origin = vec(x, y, z);
+        for (const letter of letters) {
+          const glyph = font[letter];
+          if (!glyph) { cursor += unit * 4; continue; }
+          for (let row = 0; row < glyph.length; row++) {
+            for (let col = 0; col < glyph[row].length; col++) {
+              if (glyph[row][col] === '1') {
+                localBox(origin, cursor + (col + 0.5) * unit, (3 - row) * unit, 0, unit * 0.88, unit * 0.88, unit * 0.48, tint, kind, angle);
+              }
+            }
+          }
+          cursor += (glyph[0].length + 1) * unit;
+        }
+      }
+      function glyph(value, x, y, z, unit, tint, kind = 'emit', angle = 0) {
+        const pattern = chinese[value];
+        if (!pattern) return;
+        const origin = vec(x, y, z);
+        for (let row = 0; row < 9; row++) {
+          for (let col = 0; col < 9; col++) {
+            if (pattern[row][col] === '1') localBox(origin, (col - 4) * unit, (4 - row) * unit, 0, unit * 0.94, unit * 0.94, unit * 0.55, tint, kind, angle);
+          }
+        }
+      }
+      function sign(label, x, y, z, width, height, unit, tint, kind = 'emit', angle = 0) {
+        localBox(vec(x, y, z), 0, 0, 0, width, height, 0.18, '#101a24', 'metal', angle);
+        localBox(vec(x, y, z), 0, height / 2, 0.03, width + 0.08, 0.045, 0.055, tint, kind, angle);
+        localBox(vec(x, y, z), 0, -height / 2, 0.03, width + 0.08, 0.045, 0.055, tint, kind, angle);
+        localBox(vec(x, y, z), -width / 2, 0, 0.03, 0.045, height, 0.055, tint, kind, angle);
+        localBox(vec(x, y, z), width / 2, 0, 0.03, 0.045, height, 0.055, tint, kind, angle);
+        text(label, x, y, z + 0.13, unit, kind === 'emit' ? color(tint).clone().multiplyScalar(3.0) : '#ffffff', kind, angle);
+      }
+      function pointLight(x, y, z, tint, intensity, distance) {
+        const light = new THREE.PointLight(tint, intensity, distance, 2);
+        light.position.set(x, y, z);
+        scene.add(light);
+        return light;
+      }
+      function lantern(x, y, z, scale = 1) {
+        const c = '#ff843c';
+        box(x, y, z, 0.55 * scale, 0.5 * scale, 0.55 * scale, c, 'lantern');
+        box(x, y + 0.19 * scale, z, 0.44 * scale, 0.18 * scale, 0.44 * scale, '#ff9c46', 'lantern');
+        box(x, y - 0.21 * scale, z, 0.44 * scale, 0.12 * scale, 0.44 * scale, '#ff9a40', 'lantern');
+        box(x, y, z, 0.4 * scale, 0.42 * scale, 0.575 * scale, color('#ffb44f').clone().multiplyScalar(1.8), 'emit');
+        for (const side of [-1, 1]) {
+          box(x + side * 0.25 * scale, y, z, 0.035 * scale, 0.51 * scale, 0.58 * scale, '#b93721');
+          box(x, y, z + side * 0.25 * scale, 0.58 * scale, 0.51 * scale, 0.035 * scale, '#c13e23');
+        }
+        box(x, y + 0.34 * scale, z, 0.31 * scale, 0.08 * scale, 0.31 * scale, '#62261f');
+        box(x, y - 0.32 * scale, z, 0.27 * scale, 0.08 * scale, 0.27 * scale, '#7b2922');
+        box(x, y - 0.48 * scale, z, 0.045 * scale, 0.27 * scale, 0.045 * scale, '#e15830');
+        box(x, y + 0.52 * scale, z, 0.035 * scale, 0.28 * scale, 0.035 * scale, '#28242b', 'metal');
+      }
+
+      box(0, -0.64, 0, 28.2, 1.18, 23, '#101c29', 'metal');
+      box(0, -1.23, 0, 27.8, 0.12, 22.6, '#070f1b');
+      box(0, -0.1, 0, 27.8, 0.1, 22.6, '#1b2932', 'road');
+      for (let ix = 0; ix < 46; ix++) {
+        for (let iz = 0; iz < 37; iz++) {
+          const x = -13.5 + ix * 0.6;
+          const z = -10.8 + iz * 0.6;
+          const isRoad = Math.abs(x) < 2.7 || z > 7.0;
+          const palette = isRoad ? ['#202d35', '#24333b', '#1e2d36', '#293a42', '#22323a'] : ['#3b4449', '#424a4b', '#37444a', '#434a49', '#354047'];
+          box(x, isRoad ? -0.013 : 0.045, z, 0.58, isRoad ? 0.095 : 0.17, 0.58, pick(palette), isRoad ? 'road' : 'matte');
+          if (isRoad && random() < 0.13) box(x + range(-0.1, 0.1), 0.039, z, range(0.2, 0.5), 0.008, range(0.12, 0.45), '#142b37', 'wet');
+        }
+      }
+      for (let ix = 0; ix < 47; ix++) {
+        for (const side of [-1, 1]) {
+          box(-13.8 + ix * 0.6, -0.56, side * 11.48, 0.57, 0.48, 0.12, pick(['#21303a', '#28363c', '#1b2a36']));
+        }
+      }
+      for (let iz = 0; iz < 38; iz++) {
+        for (const side of [-1, 1]) box(side * 14.08, -0.56, -11.1 + iz * 0.6, 0.12, 0.48, 0.57, pick(['#21303a', '#28363c', '#1b2a36']));
+      }
+      box(0, -0.85, 11.56, 5.5, 0.3, 0.06, '#0e1a25');
+      text('SHENZHEN  22:48', 0, -0.83, 11.603, 0.043, color('#73afbd').clone().multiplyScalar(1.15), 'emit');
+      for (const side of [-1, 1]) {
+        for (let z = -6.5; z < 7; z += 0.6) box(side * 2.87, 0.095, z, 0.18, 0.2, 0.57, '#69716b');
+        for (let x = 3.1; x < 13.2; x += 0.6) box(side * x, 0.095, 7.05, 0.56, 0.18, 0.16, '#69716b');
+      }
+      for (let x = -2.35; x <= 2.4; x += 0.52) box(x, 0.048, 7.65, 0.28, 0.018, 1.05, '#84918a', 'road');
+      for (let z = -5.7; z < 6.6; z += 1.8) box(0, 0.042, z, 0.065, 0.012, 0.48, '#8e8160', 'road');
+
+      function building({ x, z, w, d, h, tint, shop = false }) {
+        box(x, h / 2 + 0.13, z, w, h, d, tint);
+        obstacle(x, h / 2 + 0.13, z, w, h, d, 'building');
+        box(x, 0.4, z, w + 0.22, 0.5, d + 0.22, '#172a34');
+        const floors = Math.max(2, Math.floor((h - 1.2) / 1.65));
+        const floorHeight = (h - 1.0) / floors;
+        for (let floor = 0; floor < floors; floor++) {
+          const y = 1.65 + floor * floorHeight;
+          box(x, y - 0.79, z, w + 0.1, 0.07, d + 0.1, '#3e4d54');
+          for (const face of [0, 1, 2, 3]) {
+            const span = face % 2 === 0 ? w : d;
+            const count = Math.max(2, Math.floor(span / 1.05));
+            for (let col = 0; col < count; col++) {
+              const u = (col - (count - 1) / 2) * (span - 0.65) / count;
+              const angle = face * Math.PI / 2;
+              const origin = vec(x + Math.sin(angle) * (face % 2 === 0 ? d / 2 : w / 2), y, z + Math.cos(angle) * (face % 2 === 0 ? d / 2 : w / 2));
+              localBox(origin, u, 0, 0.025, 0.65, 0.98, 0.1, '#1b2932', 'matte', angle);
+              const lit = random() > 0.48;
+              const glass = lit ? color(pick(['#f5b971', '#ffc982', '#aad6d2', '#e8a779', '#8bb6c2'])).clone().multiplyScalar(range(0.65, 1.6)) : pick(['#172d3c', '#1b3343', '#213c49']);
+              localBox(origin, u, 0.015, 0.087, 0.46, 0.73, 0.035, glass, lit ? 'windows' : 'metal', angle);
+              localBox(origin, u, -0.46, 0.11, 0.74, 0.09, 0.24, '#566066', 'matte', angle);
+              localBox(origin, u, 0.02, 0.12, 0.035, 0.76, 0.035, '#26363f', 'metal', angle);
+              if (lit && random() > 0.55) localBox(origin, u + 0.11, 0.04, 0.112, 0.14, 0.65, 0.018, '#bf6747', 'matte', angle);
+              if (random() > 0.79) {
+                localBox(origin, u + 0.3, -0.65, 0.23, 0.5, 0.34, 0.46, '#7b8580', 'metal', angle);
+                for (let j = 0; j < 4; j++) localBox(origin, u + 0.3, -0.76 + j * 0.07, 0.471, 0.4, 0.024, 0.015, '#283a42', 'metal', angle);
+              }
+              if (!shop && floor % 3 === 1 && col % 3 === 0) {
+                localBox(origin, u, -0.5, 0.38, 1.0, 0.12, 0.8, '#48555a', 'matte', angle);
+                localBox(origin, u, -0.14, 0.78, 1.0, 0.06, 0.06, '#6a797b', 'metal', angle);
+                for (const rail of [-0.43, 0, 0.43]) localBox(origin, u + rail, -0.28, 0.78, 0.04, 0.48, 0.04, '#53666a', 'metal', angle);
+                if (random() > 0.4) {
+                  const cloth = pick(['#c37761', '#659994', '#c4a776', '#737eaa']);
+                  localBox(origin, u, -0.34, 0.8, 0.28, 0.4, 0.035, cloth, 'matte', angle);
+                  localBox(origin, u, -0.15, 0.8, 0.43, 0.12, 0.035, cloth, 'matte', angle);
+                }
+              }
+            }
+          }
+        }
+        for (const side of [-1, 1]) {
+          box(x + side * (w / 2 - 0.11), h / 2, z + d / 2 + 0.03, 0.11, h, 0.1, '#506067');
+          box(x + side * (w / 2 - 0.2), h / 2, z - d / 2 - 0.04, 0.07, h, 0.07, '#263d48', 'metal');
+        }
+        box(x, h + 0.2, z, w + 0.24, 0.18, d + 0.24, '#3b4a54');
+        for (const side of [-1, 1]) {
+          box(x + side * w / 2, h + 0.48, z, 0.14, 0.5, d, '#46555c');
+          box(x, h + 0.48, z + side * d / 2, w, 0.5, 0.14, '#46555c');
+        }
+        box(x - w * 0.18, h + 0.82, z - d * 0.16, 1.4, 1.12, 1.2, '#536366', 'metal');
+        box(x - w * 0.18, h + 1.43, z - d * 0.16, 1.55, 0.12, 1.35, '#273e49');
+        for (let i = 0; i < 4; i++) box(x - w * 0.18, h + 0.4 + i * 0.27, z - d * 0.16, 1.44, 0.04, 1.24, '#263c45', 'metal');
+        box(x + w * 0.24, h + 0.62, z + d * 0.13, 1.05, 0.68, 0.95, '#7c8277', 'metal');
+        for (let i = 0; i < 5; i++) box(x + w * 0.24, h + 0.62, z + d * 0.13 + 0.49, 0.8, 0.055, 0.03, '#344851', 'metal');
+        const antennaX = x + w * 0.27;
+        beam(vec(antennaX, h + 0.3, z - d * 0.3), vec(antennaX, h + 2.7, z - d * 0.3), 0.055, '#63757b');
+        for (let i = 0; i < 3; i++) beam(vec(antennaX - 0.55 + i * 0.12, h + 1.8 + i * 0.33, z - d * 0.3), vec(antennaX + 0.55 - i * 0.12, h + 1.8 + i * 0.33, z - d * 0.3), 0.035, '#63757b');
+        if (shop) {
+          for (const side of [-1, 1]) {
+            box(x + side * (w / 2 + 0.02), 1.23, z, 0.09, 1.85, d * 0.65, '#233f47', 'metal');
+            for (let j = 0; j < 12; j++) box(x + side * (w / 2 + 0.075), 0.42 + j * 0.14, z, 0.04, 0.035, d * 0.65, '#59706c', 'metal');
+          }
+          box(x, 1.23, z + d / 2 + 0.035, w * 0.74, 1.9, 0.08, '#203b43', 'metal');
+          for (let j = 0; j < 12; j++) box(x, 0.4 + j * 0.145, z + d / 2 + 0.083, w * 0.74, 0.035, 0.025, '#4b6667', 'metal');
+        }
+      }
+
+      building({ x: -9.5, z: -6.75, w: 5.1, d: 5.7, h: 18.4, tint: '#293a45' });
+      building({ x: -3.65, z: -9.0, w: 4.25, d: 3.8, h: 14.7, tint: '#303945' });
+      building({ x: 2.1, z: -9.0, w: 4.7, d: 4.0, h: 22.0, tint: '#253945' });
+      building({ x: 8.2, z: -7.15, w: 4.9, d: 5.3, h: 17.2, tint: '#343b47' });
+      building({ x: -10.65, z: 3.7, w: 4.35, d: 5.1, h: 5.8, tint: '#37454a', shop: true });
+      building({ x: -10.65, z: -1.65, w: 4.35, d: 5.0, h: 7.9, tint: '#2b4148', shop: true });
+      building({ x: 10.6, z: 3.65, w: 4.3, d: 5.1, h: 6.6, tint: '#3d4449', shop: true });
+      building({ x: 10.6, z: -1.65, w: 4.3, d: 5.0, h: 5.3, tint: '#2c4147', shop: true });
+      building({ x: 0, z: -5.7, w: 2.9, d: 2.25, h: 4.8, tint: '#3a4146', shop: true });
+      sign('24H', -10.5, 3.02, 6.31, 2.8, 0.83, 0.093, '#6df5da', 'neonCyan');
+      sign('EAT', 10.5, 3.08, 6.27, 3.05, 0.83, 0.12, '#ff9561', 'neonRose');
+      text('BAO', -8.41, 2.67, -1.6, 0.105, '#ffffff', 'neonAmber', Math.PI / 2);
+      text('TEA', 8.39, 2.65, 3.4, 0.105, '#ffffff', 'neonCyan', -Math.PI / 2);
+      sign('NOODLE', -3.6, 4.17, -6.99, 3.65, 0.86, 0.083, '#ffb66d');
+      sign('HOTEL', 8.3, 4.0, -4.43, 3.9, 0.9, 0.1, '#fd7b65');
+
+      function verticalSign(x, y, z, characters, tint, kind, unit = 0.115) {
+        const h = characters.length * 1.65 + 0.7;
+        box(x, y, z, 1.57, h, 0.32, '#351b28', 'metal');
+        box(x - 0.76, y, z + 0.12, 0.065, h + 0.12, 0.1, '#ffffff', kind);
+        box(x + 0.76, y, z + 0.12, 0.065, h + 0.12, 0.1, '#ffffff', kind);
+        box(x, y + h / 2, z + 0.12, 1.55, 0.06, 0.1, '#ffffff', kind);
+        box(x, y - h / 2, z + 0.12, 1.55, 0.06, 0.1, '#ffffff', kind);
+        characters.forEach((character, i) => glyph(character, x, y + (characters.length - 1) * 0.825 - i * 1.65, z + 0.2, unit, '#ffffff', kind));
+        for (const direction of [-1, 1]) box(x + direction * 1.0, y + h * 0.28, z - 0.05, 0.58, 0.1, 0.1, '#1c2c34', 'metal');
+        obstacle(x, y, z, 1.57, h, 0.32, 'sign');
+      }
+      verticalSign(-7.35, 7.2, 0.9, ['夜', '市'], '#ff4663', 'neonRose', 0.125);
+      verticalSign(7.45, 6.4, -2.65, ['小', '吃'], '#4ef7d6', 'neonCyan', 0.115);
+      verticalSign(-5.45, 12.0, -3.78, ['深', '圳'], '#ffb457', 'neonAmber', 0.105);
+      sign('CHA', 8.05, 4.65, 1.3, 1.6, 1.05, 0.105, '#66e5c9', 'neonCyan');
+      pointLight(-6.0, 5.5, 1.5, '#ff3865', 42, 10);
+      pointLight(6.6, 4.5, -2.0, '#27e2ce', 35, 9);
+      pointLight(-4.6, 9.0, -2.6, '#ff9a43', 28, 9);
+
+      for (const side of [-1, 1]) {
+        box(side * 2.96, 2.79, 7.35, 0.15, 5.45, 0.17, '#283f46', 'metal');
+        box(side * 2.96, 0.36, 7.35, 0.36, 0.5, 0.37, '#4c5e60');
+        box(side * 2.96, 4.4, 7.37, 0.22, 0.07, 0.24, color('#48dac7').clone().multiplyScalar(2.5), 'emit');
+      }
+      box(0, 5.46, 7.35, 6.1, 0.14, 0.22, '#37555b', 'metal');
+      box(0, 5.78, 7.35, 3.5, 1.22, 0.25, '#182d36', 'metal');
+      obstacle(0, 5.78, 7.35, 3.5, 1.22, 0.25, 'gate');
+      glyph('夜', -0.66, 5.95, 7.51, 0.076, color('#ffc266').clone().multiplyScalar(3.5), 'emit');
+      glyph('市', 0.66, 5.95, 7.51, 0.076, color('#ffc266').clone().multiplyScalar(3.5), 'emit');
+      text('NIGHT MARKET', 0, 5.34, 7.51, 0.041, color('#7ce8d6').clone().multiplyScalar(2.1), 'emit');
+      box(0, 6.44, 7.35, 3.75, 0.08, 0.48, '#a85239');
+      lantern(-2.47, 4.78, 7.35, 0.65);
+      lantern(2.47, 4.78, 7.35, 0.65);
+
+      const steamSources = [];
+      const smokeSources = [];
+      const reflectionSources = [];
+      const vendorSpots = [];
+      const stallPalette = [
+        { name: 'MEIN', cloth: '#a63832', stripe: '#e4b783', neon: '#ffb457', kind: 'neonAmber' },
+        { name: 'BAO', cloth: '#247b75', stripe: '#d8d2a3', neon: '#5aebd2', kind: 'neonCyan' },
+        { name: 'WOK', cloth: '#a34236', stripe: '#e4b985', neon: '#ff7652', kind: 'neonRose' },
+        { name: 'CHA', cloth: '#277b74', stripe: '#d2cfac', neon: '#5ae8d1', kind: 'neonCyan' },
+        { name: 'SOUP', cloth: '#a24c36', stripe: '#e7c994', neon: '#ffa25b', kind: 'neonAmber' },
+        { name: 'SATAY', cloth: '#8c3741', stripe: '#d9b786', neon: '#ff6572', kind: 'neonRose' }
+      ];
+      function pot(x, y, z, size = 0.65) {
+        box(x, y, z, size, 0.22, size, '#4e6269', 'metal');
+        box(x, y + 0.125, z, size - 0.12, 0.025, size - 0.12, '#101b22', 'metal');
+        for (const side of [-1, 1]) {
+          box(x + side * size / 2, y + 0.1, z, 0.055, 0.13, size + 0.04, '#a3b0a6', 'metal');
+          box(x, y + 0.1, z + side * size / 2, size + 0.04, 0.13, 0.055, '#a3b0a6', 'metal');
+          box(x + side * (size / 2 + 0.13), y + 0.09, z, 0.24, 0.065, 0.1, '#202c30', 'metal');
+        }
+        box(x, y - 0.16, z, size * 0.74, 0.08, size * 0.74, color('#ff7129').clone().multiplyScalar(2.4), 'emit');
+      }
+      function bowl(x, y, z, tint = '#c3d5c4') {
+        box(x, y, z, 0.25, 0.14, 0.25, tint);
+        box(x, y + 0.079, z, 0.21, 0.018, 0.21, '#63422b');
+        box(x + 0.015, y + 0.092, z, 0.16, 0.012, 0.13, '#dbab59');
+        box(x + 0.08, y + 0.15, z, 0.022, 0.025, 0.35, '#a67a4b', 'matte', [0, -0.12, 0]);
+      }
+      function crate(x, y, z, tint = '#766048', scale = 1) {
+        box(x, y + 0.24 * scale, z, 0.65 * scale, 0.46 * scale, 0.55 * scale, '#2c3430');
+        for (let i = 0; i < 3; i++) {
+          for (const side of [-1, 1]) {
+            box(x, y + (0.09 + i * 0.15) * scale, z + side * 0.285 * scale, 0.68 * scale, 0.075 * scale, 0.045 * scale, tint);
+            box(x + side * 0.33 * scale, y + (0.09 + i * 0.15) * scale, z, 0.045 * scale, 0.075 * scale, 0.57 * scale, tint);
+          }
+        }
+      }
+      function stool(x, z, tint = '#a74539') {
+        box(x, 0.5, z, 0.43, 0.12, 0.43, tint);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(x + sx * 0.145, 0.26, z + sz * 0.145, 0.065, 0.4, 0.065, tint);
+      }
+      function stall(side, z, style, index) {
+        const x = side * 5.0;
+        box(x, 0.23, z, 3.4, 0.18, 3.75, '#354347');
+        box(side * 5.85, 1.27, z, 0.18, 1.85, 3.32, '#314348');
+        box(side * 4.11, 0.75, z, 0.76, 1.05, 3.32, '#394549');
+        box(side * 4.09, 1.3, z, 0.95, 0.14, 3.55, '#9a8f77', 'metal');
+        box(side * 3.7, 0.86, z, 0.055, 0.64, 3.15, style.cloth);
+        text(index % 2 ? 'FRESH' : 'HOT', side * 3.661, 0.87, z, 0.059, '#e3c18f', 'matte', -side * Math.PI / 2);
+        for (const px of [3.69, 6.5]) for (const pz of [-1.65, 1.65]) {
+          box(side * px, 1.76, z + pz, 0.085, 3.06, 0.085, '#6d7163', 'metal');
+          box(side * px, 3.3, z + pz, 0.15, 0.09, 0.15, '#b39461', 'metal');
+        }
+        for (let stripe = 0; stripe < 10; stripe++) {
+          const tint = stripe % 2 ? style.stripe : style.cloth;
+          box(x, 3.22, z - 1.8 + stripe * 0.4, 3.42, 0.13, 0.39, tint);
+          box(side * 3.27, 3.055, z - 1.8 + stripe * 0.4, 0.12, 0.34, 0.39, tint);
+          box(side * 3.18, 2.91, z - 1.8 + stripe * 0.4, 0.06, 0.065, 0.23, tint);
+        }
+        obstacle(x, 3.22, z, 3.42, 0.13, 3.95, 'awning');
+        sign(style.name, x, 3.76, z + 1.45, 3.25, 0.76, style.name.length > 4 ? 0.078 : 0.125, style.neon, style.kind);
+        for (let i = 0; i < 7; i++) box(side * 4.4 + i * 0.23 * side, 2.91, z - 1.45, 0.14, 0.04, 0.1, color('#ffd68a').clone().multiplyScalar(3.1), 'emit');
+        lantern(side * 3.52, 2.54, z + 1.25, 0.55);
+        lantern(side * 3.52, 2.54, z - 1.25, 0.55);
+        const kitchenX = side * 4.27;
+        if (index === 0 || index === 4) {
+          pot(kitchenX, 1.47, z - 0.3, 0.75);
+          steamSources.push(vec(kitchenX, 1.7, z - 0.3));
+          bowl(kitchenX, 1.43, z + 0.68);
+          bowl(kitchenX, 1.43, z + 1.13);
+          for (let i = 0; i < 5; i++) box(kitchenX + range(-0.2, 0.2), 1.625, z - 0.3 + range(-0.18, 0.18), 0.035, 0.025, 0.23, '#e8c07c', 'matte', [0, range(-1, 1), 0]);
+        } else if (index === 1 || index === 5) {
+          for (let stack = 0; stack < 3; stack++) {
+            box(kitchenX, 1.42 + stack * 0.16, z - 0.3, 0.7, 0.13, 0.7, '#a9804f');
+            box(kitchenX, 1.49 + stack * 0.16, z - 0.3, 0.74, 0.035, 0.74, '#d1ac6a');
+          }
+          box(kitchenX, 1.91, z - 0.3, 0.72, 0.07, 0.72, '#c5a06a');
+          box(kitchenX, 1.98, z - 0.3, 0.16, 0.08, 0.16, '#755336');
+          steamSources.push(vec(kitchenX, 1.94, z - 0.3));
+          for (let i = 0; i < 4; i++) {
+            const dz = 0.4 + Math.floor(i / 2) * 0.4;
+            const dx = (i % 2 - 0.5) * 0.35;
+            box(kitchenX + dx, 1.47, z + dz, 0.24, 0.17, 0.24, '#e5d7b5');
+            box(kitchenX + dx, 1.58, z + dz, 0.16, 0.06, 0.16, '#f0dfbd');
+          }
+        } else if (index === 2) {
+          box(kitchenX, 1.46, z, 0.78, 0.18, 1.35, '#17262d', 'metal');
+          box(kitchenX, 1.56, z, 0.65, 0.035, 1.19, color('#fa592a').clone().multiplyScalar(1.7), 'emit');
+          for (let i = 0; i < 7; i++) {
+            box(kitchenX, 1.63, z - 0.53 + i * 0.18, 0.81, 0.035, 0.035, '#687673', 'metal');
+            for (let j = 0; j < 3; j++) box(kitchenX + (j - 1) * 0.19, 1.69, z - 0.53 + i * 0.18, 0.13, 0.1, 0.11, j % 2 ? '#d87f40' : '#ac4930');
+          }
+          smokeSources.push(vec(kitchenX, 1.76, z));
+        } else {
+          box(kitchenX, 1.48, z - 0.28, 0.65, 0.3, 0.63, '#39837b', 'metal');
+          box(kitchenX, 1.65, z - 0.28, 0.53, 0.045, 0.51, '#b3c2b2', 'metal');
+          box(kitchenX, 1.7, z - 0.28, 0.13, 0.08, 0.13, '#344d4b');
+          box(kitchenX + side * 0.42, 1.5, z - 0.28, 0.24, 0.12, 0.16, '#809b8b', 'metal');
+          for (let i = 0; i < 6; i++) bowl(kitchenX, 1.42, z + 0.22 + (i % 3) * 0.34, '#b8d9c3');
+          for (let i = 0; i < 4; i++) {
+            box(side * 5.6, 0.52 + i * 0.38, z + 1.15, 0.4, 0.3, 0.4, pick(['#a57c4d', '#68816b', '#ad6145']));
+            box(side * 5.6, 0.69 + i * 0.38, z + 1.15, 0.42, 0.06, 0.42, '#c4b48b');
+          }
+          steamSources.push(vec(kitchenX, 1.78, z - 0.28));
+        }
+        for (let i = 0; i < 3; i++) {
+          box(side * 3.61, 1.85 + i * 0.27, z - 0.35, 0.045, 0.21, 0.7, '#d6c7a0');
+          text(String(8 + i * 4), side * 3.577, 1.85 + i * 0.27, z - 0.35, 0.029, '#6a4334', 'matte', -side * Math.PI / 2);
+        }
+        crate(side * 6.35, 0.29, z + 2.05, '#8b6b47');
+        crate(side * 6.3, 0.76, z + 2.02, '#5f8568', 0.9);
+        for (let i = 0; i < 8; i++) box(side * 6.3 + range(-0.23, 0.23), 1.13, z + 2.0 + range(-0.2, 0.2), 0.13, 0.16, 0.13, pick(['#d89145', '#7fa260', '#b85738']));
+        box(side * 5.85, 0.61, z - 1.1, 0.46, 0.63, 0.46, '#477a76', 'metal');
+        box(side * 5.85, 0.96, z - 1.1, 0.27, 0.1, 0.27, '#b8b7a1', 'metal');
+        box(side * 5.85, 1.06, z - 1.1, 0.1, 0.1, 0.1, '#a65942');
+        stool(side * 3.15, z - 1.28, style.cloth);
+        vendorSpots.push({ x: side * 5.15, z, yaw: -side * Math.PI / 2, style: index });
+        pointLight(side * 3.9, 2.5, z, style.neon, index % 3 === 1 ? 18 : 25, 6.7);
+        reflectionSources.push({ x: side * 2.1, z, tint: style.neon, width: 0.45 });
+      }
+      stall(1, 4.05, stallPalette[0], 0);
+      stall(1, 0.0, stallPalette[1], 1);
+      stall(1, -4.0, stallPalette[2], 2);
+      stall(-1, 4.05, stallPalette[3], 3);
+      stall(-1, 0.0, stallPalette[4], 4);
+      stall(-1, -4.0, stallPalette[5], 5);
+
+      function diningTable(x, z) {
+        box(x, 0.81, z, 1.13, 0.12, 0.82, '#887657');
+        for (const side of [-1, 1]) box(x + side * 0.37, 0.45, z, 0.08, 0.63, 0.55, '#3b5154', 'metal');
+        bowl(x - 0.26, 0.95, z);
+        bowl(x + 0.28, 0.95, z + 0.04, '#b4c6b4');
+        box(x, 0.98, z - 0.21, 0.13, 0.23, 0.13, '#72a29a');
+        box(x, 1.13, z - 0.21, 0.06, 0.07, 0.06, '#b9d0b9');
+        stool(x - 0.87, z, '#95614c');
+        stool(x + 0.87, z, '#487c77');
+      }
+      diningTable(-7.8, 8.55);
+      diningTable(7.35, 8.7);
+      diningTable(-10.1, 8.7);
+      for (const [x, z] of [[-5.8, 7.3], [5.3, 8.5], [-12.5, 5.9], [12.6, 5.9], [1.5, -6.5]]) {
+        box(x, 0.42, z, 0.56, 0.62, 0.56, '#4b5a51');
+        box(x, 0.73, z, 0.61, 0.08, 0.61, '#263932');
+        for (let i = 0; i < 9; i++) {
+          const px = x + range(-0.27, 0.27), pz = z + range(-0.25, 0.25);
+          box(px, 0.95 + range(0, 0.25), pz, 0.16, range(0.25, 0.6), 0.15, pick(['#41715c', '#4c8061', '#588561']));
+          box(px, 1.25 + range(-0.08, 0.18), pz, 0.29, 0.17, 0.28, pick(['#507e58', '#6b9467', '#366a57']));
+        }
+      }
+      for (const [x, z] of [[-11.8, 7.2], [11.8, 7.2]]) {
+        box(x, 1.01, z, 0.7, 1.56, 0.68, '#285b5d', 'metal');
+        box(x, 1.4, z + 0.36, 0.47, 0.39, 0.045, color('#78c9b5').clone().multiplyScalar(0.7), 'windows');
+        box(x, 0.65, z + 0.38, 0.44, 0.08, 0.07, '#152c35');
+        box(x, 1.87, z, 0.77, 0.09, 0.75, '#65867a');
+      }
+      for (let i = 0; i < 15; i++) {
+        const x = pick([-1, 1]) * range(3.0, 12.7), z = range(7.7, 10.3);
+        box(x, 0.047, z, range(0.05, 0.16), 0.008, range(0.06, 0.19), pick(['#a19d84', '#767d70', '#b78b62']), 'matte', [0, range(0, 3), 0]);
+      }
+
+      for (const side of [-1, 1]) {
+        const x = side * 12.25, z = 7.0;
+        box(x, 4.6, z, 0.19, 9.1, 0.19, '#3a474d', 'metal');
+        box(x, 8.5, z, 1.8, 0.13, 0.16, '#47575c', 'metal');
+        for (let i = -2; i <= 2; i++) box(x + i * 0.35, 8.72, z, 0.1, 0.32, 0.12, '#68716a');
+        box(x + 0.35 * side, 6.9, z, 0.5, 0.8, 0.42, '#4c5b5c', 'metal');
+        cable(vec(x, 8.75, z), vec(side * 9.0, 13.5, -5.7), 1.5, 0.045);
+      }
+      for (let i = 0; i < 7; i++) {
+        const z = 5.5 - i * 1.65;
+        cable(vec(-10.0, 7.9 + (i % 3) * 0.3, z), vec(10.0, 8.2 + (i % 2) * 0.55, z - 1.0), 1.05 + (i % 3) * 0.25, 0.026 + (i % 2) * 0.012, '#15232c');
+      }
+      cable(vec(-12.1, 8.7, 7.0), vec(11.9, 8.7, 7.0), 1.1, 0.055);
+      for (let row = 0; row < 3; row++) {
+        const z = [5.0, -0.35, -5.55][row];
+        const height = [6.2, 5.8, 6.7][row];
+        const sag = [0.62, 0.68, 0.55][row];
+        cable(vec(-7.3, height, z), vec(7.3, height, z), sag, 0.035, '#292e30');
+        for (let i = 0; i < 7; i++) {
+          const t = (i + 0.5) / 7;
+          const x = -7.3 + t * 14.6;
+          const y = height - Math.sin(t * Math.PI) * sag - 0.88;
+          lantern(x, y, z, row === 2 ? 0.72 : 0.78);
+        }
+        pointLight(0, height - 1.65, z, '#ff923d', 30, 10);
+        reflectionSources.push({ x: 0, z, tint: '#ff9e49', width: 0.4 });
+      }
+      for (const side of [-1, 1]) {
+        cable(vec(side * 8.4, 6.4, 6.2), vec(side * 8.4, 8.6, -5.0), 0.65, 0.045);
+        cable(vec(side * 11.6, 5.4, 5.7), vec(side * 6.8, 6.8, 2.2), 0.4, 0.032);
+      }
+
+      for (const source of reflectionSources) {
+        for (let i = 0; i < 27; i++) {
+          const t = i / 27;
+          const z = source.z - 1.1 + t * 7.4 + range(-0.15, 0.15);
+          if (z > 10.7 || z < -7.0) continue;
+          const x = source.x + Math.sin(t * 6.0) * 0.15 + range(-0.2, 0.2);
+          const brightness = (1 - t) * 1.8 + 0.15;
+          box(x, 0.052 + random() * 0.005, z, range(0.06, source.width) * (0.6 + t), 0.008, range(0.08, 0.34 + t * 0.25), color(source.tint).clone().multiplyScalar(brightness), 'reflection');
+        }
+      }
+      buildBatches();
+
+      const reflectionTarget = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+      const reflectionCamera = new THREE.CubeCamera(0.1, 100, reflectionTarget);
+      reflectionCamera.position.set(0, 1.0, 2.5);
+      scene.add(reflectionCamera);
+      for (const mesh of staticMeshes) if (['road', 'wet', 'reflection'].includes(mesh.name.slice(7))) mesh.visible = false;
+      renderer.shadowMap.needsUpdate = true;
+      reflectionCamera.update(renderer, scene);
+      for (const mesh of staticMeshes) mesh.visible = true;
+      road.envMap = reflectionTarget.texture;
+      wet.envMap = reflectionTarget.texture;
+      road.needsUpdate = true;
+      wet.needsUpdate = true;
+      renderer.shadowMap.needsUpdate = true;
+
+      const actorMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const actorMetal = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.38, metalness: 0.5 });
+      const actorGlow = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+      const actors = [];
+      const walkers = [];
+      const scooters = [];
+      let dynamicVoxelCount = 0;
+      class VoxelActor {
+        constructor(name) {
+          this.name = name;
+          this.group = new THREE.Group();
+          this.parts = [];
+          this.group.name = name;
+          scene.add(this.group);
+          actors.push(this);
+        }
+        cube(x, y, z, sx, sy, sz, tint, kind = 'matte', rotation = [0, 0, 0]) {
+          const part = { x, y, z, sx, sy, sz, tint: color(tint), kind, rotation };
+          this.parts.push(part);
+          return part;
+        }
+        build() {
+          for (const kind of ['matte', 'metal', 'glow']) {
+            const parts = this.parts.filter(part => part.kind === kind);
+            if (!parts.length) continue;
+            const mesh = new THREE.InstancedMesh(cube, kind === 'metal' ? actorMetal : kind === 'glow' ? actorGlow : actorMaterial, parts.length);
+            parts.forEach((part, index) => {
+              part.mesh = mesh;
+              part.index = index;
+              mesh.setColorAt(index, part.tint);
+            });
+            mesh.instanceColor.needsUpdate = true;
+            mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            mesh.frustumCulled = false;
+            mesh.receiveShadow = true;
+            this.group.add(mesh);
+          }
+          this.update();
+          dynamicVoxelCount += this.parts.length;
+        }
+        set(part, x, y, z, rx = 0, ry = 0, rz = 0) {
+          part.x = x; part.y = y; part.z = z;
+          part.rotation = [rx, ry, rz];
+        }
+        update() {
+          for (const part of this.parts) {
+            matrixObject.position.set(part.x, part.y, part.z);
+            matrixObject.scale.set(part.sx, part.sy, part.sz);
+            matrixObject.rotation.set(...part.rotation);
+            matrixObject.updateMatrix();
+            part.mesh.setMatrixAt(part.index, matrixObject.matrix);
+          }
+          for (const child of this.group.children) child.instanceMatrix.needsUpdate = true;
+        }
+      }
+      const skinTones = ['#c89272', '#d4a07b', '#b47a5b', '#e0b18b', '#a76c52'];
+      const shirtTones = ['#ba514c', '#378b8d', '#d3a65c', '#7d6796', '#4f86a2', '#b97d65', '#b8c1a0'];
+      const pantsTones = ['#213440', '#2f3747', '#354548', '#493d47'];
+      function person(name, options = {}) {
+        const actor = new VoxelActor(name);
+        const skin = options.skin || pick(skinTones);
+        const shirt = options.shirt || pick(shirtTones);
+        const pants = pick(pantsTones);
+        const hair = pick(['#20212a', '#2b252a', '#3a2b28']);
+        actor.cube(0, 1.02, 0, 0.41, 0.5, 0.28, shirt);
+        actor.cube(0, 0.77, 0, 0.36, 0.1, 0.27, pants);
+        actor.cube(0, 1.24, 0.015, 0.2, 0.08, 0.27, options.vendor ? '#e2d8bc' : shirt);
+        const head = actor.cube(0, 1.43, 0.015, 0.32, 0.34, 0.29, skin);
+        actor.cube(0, 1.615, -0.012, 0.34, 0.08, 0.31, hair);
+        actor.cube(0, 1.47, -0.146, 0.33, 0.24, 0.05, hair);
+        actor.cube(-0.11, 1.565, 0.13, 0.12, 0.08, 0.07, hair);
+        actor.cube(-0.073, 1.445, 0.166, 0.035, 0.04, 0.014, '#242b32');
+        actor.cube(0.073, 1.445, 0.166, 0.035, 0.04, 0.014, '#242b32');
+        actor.cube(0, 1.368, 0.173, 0.06, 0.06, 0.06, skin);
+        if (options.vendor) {
+          actor.cube(0, 1.02, 0.16, 0.31, 0.44, 0.04, '#dfd4b5');
+          actor.cube(0, 1.69, 0, 0.4, 0.17, 0.35, '#e4e2cf');
+          actor.cube(0, 1.6, 0.055, 0.42, 0.06, 0.41, '#c8d3c5');
+        } else if (random() > 0.65) {
+          actor.cube(0, 1.62, 0, 0.38, 0.12, 0.35, pick(['#b75c46', '#476e7e', '#c29b54']));
+          actor.cube(0, 1.575, 0.19, 0.4, 0.05, 0.2, '#b35a46');
+        }
+        const arms = [], legs = [];
+        for (const side of [-1, 1]) {
+          const arm = actor.cube(side * 0.265, 1.025, 0, 0.13, 0.37, 0.16, shirt);
+          const hand = actor.cube(side * 0.265, 0.79, 0, 0.13, 0.15, 0.14, skin);
+          arms.push({ arm, hand, side });
+          const leg = actor.cube(side * 0.105, 0.405, 0, 0.16, 0.58, 0.18, pants);
+          const foot = actor.cube(side * 0.105, 0.1, 0.045, 0.18, 0.13, 0.29, '#1e2932');
+          legs.push({ leg, foot, side });
+        }
+        if (options.bag || random() > 0.7) {
+          actor.cube(0.3, 0.79, 0.025, 0.22, 0.33, 0.29, pick(['#c2a271', '#5c887a', '#aa6552']));
+          actor.cube(0.3, 1.0, 0.025, 0.04, 0.18, 0.18, '#a69d7e');
+        }
+        if (options.phone) {
+          actor.cube(0.23, 1.11, 0.28, 0.12, 0.21, 0.04, '#172932', 'metal');
+          actor.cube(0.23, 1.11, 0.305, 0.09, 0.16, 0.012, color('#76d6df').clone().multiplyScalar(1.3), 'glow');
+        }
+        if (options.bowl) {
+          actor.cube(-0.03, 1.03, 0.36, 0.29, 0.16, 0.26, '#d4d4b9');
+          actor.cube(-0.03, 1.118, 0.36, 0.23, 0.017, 0.2, '#bd8b4c');
+          actor.cube(0.12, 1.23, 0.39, 0.023, 0.025, 0.4, '#bd9868', 'matte', [0, 0.2, 0]);
+        }
+        actor.cube(0, 0.018, 0, 0.4, 0.014, 0.35, '#101c25');
+        actor.build();
+        actor.group.scale.setScalar(options.scale || range(0.86, 1.04));
+        actor.group.rotation.y = options.yaw || 0;
+        actor.group.position.set(options.x || 0, options.y ?? 0.075, options.z || 0);
+        return { actor, arms, legs, head, options };
+      }
+      function animatePerson(rig, time, walking = false) {
+        const phase = time * 5.236 + rig.options.phase * TAU;
+        const swing = walking ? Math.sin(phase) * 0.48 : 0;
+        for (const { leg, foot, side } of rig.legs) {
+          const angle = swing * side;
+          rig.actor.set(leg, side * 0.105, 0.72 - Math.cos(angle) * 0.29, -Math.sin(angle) * 0.29, angle);
+          rig.actor.set(foot, side * 0.105, 0.72 - Math.cos(angle) * 0.59 - 0.04, -Math.sin(angle) * 0.59 + 0.045);
+        }
+        rig.arms.forEach(({ arm, hand, side }, index) => {
+          let angle = walking ? -swing * side * 0.65 : -0.12 + Math.sin(time * 1.256 + rig.options.phase * 5 + side) * 0.065;
+          if (rig.options.vendor) angle = index === 0 ? -0.92 + Math.sin(time * 4.188 + rig.options.phase) * 0.23 : -0.55;
+          if (rig.options.bowl) angle = index === 0 ? -1.15 : -1.48 + Math.sin(time * 2.094 + rig.options.phase) * 0.22;
+          if (rig.options.phone && index === 1) angle = -1.5;
+          if (rig.options.bargain && index === 0) angle = -1.05 + Math.sin(time * 2.094 + rig.options.phase) * 0.35;
+          const length = 0.38;
+          rig.actor.set(arm, side * 0.265, 1.2 - Math.cos(angle) * length / 2, -Math.sin(angle) * length / 2, angle);
+          rig.actor.set(hand, side * 0.265, 1.2 - Math.cos(angle) * (length + 0.06), -Math.sin(angle) * (length + 0.06));
+        });
+        rig.actor.group.position.y = (rig.options.y ?? 0.075) + (walking ? Math.abs(Math.sin(phase)) * 0.035 : Math.sin(time * 1.57 + rig.options.phase) * 0.008);
+        rig.actor.update();
+      }
+      for (const vendor of vendorSpots) {
+        const rig = person(`vendor-${vendor.style}`, { x: vendor.x, z: vendor.z, y: 0.28, yaw: vendor.yaw, vendor: true, shirt: vendor.style % 2 ? '#4c7773' : '#a65c4b', phase: random(), scale: 0.96 });
+        walkers.push({ rig, stationary: true });
+      }
+      const customerPositions = [[3.0, 4.3, -Math.PI / 2], [-3.0, 4.1, Math.PI / 2], [3.03, -0.4, -Math.PI / 2], [-3.02, -0.3, Math.PI / 2], [3.1, -3.7, -Math.PI / 2], [-3.1, -4.5, Math.PI / 2]];
+      customerPositions.forEach(([x, z, yaw], i) => {
+        const rig = person(`customer-${i}`, { x, z, yaw, bowl: i % 3 === 0, bargain: i % 3 === 1, phone: i === 5, phase: random(), bag: i === 4 });
+        walkers.push({ rig, stationary: true });
+      });
+      [[-8.65, 8.5, Math.PI / 2], [-6.95, 8.6, -Math.PI / 2], [6.5, 8.7, Math.PI / 2], [8.2, 8.7, -Math.PI / 2], [-10.95, 8.7, Math.PI / 2]].forEach(([x, z, yaw], i) => {
+        const rig = person(`diner-${i}`, { x, z, yaw, bowl: true, phase: random(), scale: 0.91, y: -0.09 });
+        rig.legs.forEach(({ leg, foot, side }) => {
+          rig.actor.set(leg, side * 0.11, 0.51, 0.2, 0.16, Math.PI / 2);
+          rig.actor.set(foot, side * 0.11, 0.15, 0.41);
+        });
+        walkers.push({ rig, stationary: true });
+      });
+      const walkingPath = new THREE.CatmullRomCurve3([
+        vec(-0.95, 0, 6.4), vec(-1.48, 0, 2.7), vec(-1.08, 0, -3.2), vec(-0.6, 0, -6.25),
+        vec(0.9, 0, -5.9), vec(1.46, 0, -0.6), vec(1.1, 0, 4.9), vec(0.45, 0, 6.6)
+      ], true, 'catmullrom', 0.18);
+      for (let i = 0; i < 13; i++) {
+        const rig = person(`walker-${i}`, { phase: random(), phone: i === 3 || i === 10, bowl: i === 7, bag: i % 4 === 0, scale: i === 11 ? 0.67 : range(0.88, 1.04) });
+        walkers.push({ rig, stationary: false, phase: i / 13 + random() * 0.025, speed: i % 3 === 0 ? 0.5 : 1 });
+      }
+      const frontPath = new THREE.CatmullRomCurve3([vec(-11.5, 0, 9.6), vec(-4, 0, 9.8), vec(4, 0, 10.0), vec(11.4, 0, 9.5), vec(4.1, 0, 9.1), vec(-5, 0, 9.15)], true, 'catmullrom', 0.15);
+      for (let i = 0; i < 5; i++) {
+        const rig = person(`front-walker-${i}`, { phase: random(), bag: i === 2, bowl: i === 1, scale: range(0.84, 1.03) });
+        walkers.push({ rig, stationary: false, path: frontPath, phase: i / 5, speed: 1 });
+      }
+
+      function scooter(name, tint, parked = false) {
+        const actor = new VoxelActor(name);
+        actor.cube(0, 0.42, 0, 0.37, 0.13, 0.94, '#263740', 'metal');
+        actor.cube(0, 0.68, -0.36, 0.43, 0.42, 0.58, tint, 'metal');
+        actor.cube(0, 0.92, -0.35, 0.36, 0.1, 0.51, '#1c2b33');
+        actor.cube(0, 0.77, 0.42, 0.44, 0.57, 0.16, tint, 'metal', [-0.18, 0, 0]);
+        actor.cube(0, 1.09, 0.36, 0.65, 0.055, 0.085, '#9ba6a0', 'metal');
+        for (const side of [-1, 1]) {
+          actor.cube(side * 0.3, 1.075, 0.37, 0.18, 0.075, 0.11, '#27353c');
+          actor.cube(side * 0.25, 1.28, 0.36, 0.025, 0.34, 0.03, '#91a6a5', 'metal');
+          actor.cube(side * 0.25, 1.45, 0.36, 0.15, 0.11, 0.055, '#597578', 'metal');
+          actor.cube(side * 0.235, 0.68, -0.34, 0.025, 0.09, 0.33, '#b6b7a4', 'metal');
+        }
+        const wheels = [];
+        for (const z of [-0.52, 0.53]) {
+          const wheel = actor.cube(0, 0.29, z, 0.18, 0.45, 0.43, '#111b25');
+          actor.cube(0, 0.29, z, 0.195, 0.21, 0.2, '#789092', 'metal');
+          wheels.push(wheel);
+        }
+        actor.cube(0, 0.95, 0.525, 0.23, 0.17, 0.07, color('#ffe3a0').clone().multiplyScalar(3.5), 'glow');
+        actor.cube(0, 0.74, -0.67, 0.19, 0.1, 0.05, color('#ff4738').clone().multiplyScalar(2.2), 'glow');
+        actor.cube(0, 0.52, -0.72, 0.26, 0.13, 0.035, '#d2c9a3');
+        if (!parked) {
+          const skin = pick(skinTones);
+          actor.cube(0, 1.18, -0.23, 0.4, 0.46, 0.3, pick(shirtTones));
+          actor.cube(0, 1.58, -0.16, 0.34, 0.34, 0.31, skin);
+          actor.cube(0, 1.73, -0.17, 0.39, 0.22, 0.37, pick(['#cb604b', '#518e95', '#d4ab5f']));
+          actor.cube(0, 1.61, 0.015, 0.3, 0.11, 0.045, '#293f4d', 'metal');
+          for (const side of [-1, 1]) {
+            actor.cube(side * 0.245, 1.13, 0.08, 0.14, 0.39, 0.15, '#a9a184', 'matte', [-0.92, 0, 0]);
+            actor.cube(side * 0.21, 0.84, 0.08, 0.17, 0.2, 0.49, '#273c4a');
+            actor.cube(side * 0.23, 0.6, 0.27, 0.16, 0.39, 0.16, '#273c4a');
+          }
+          actor.cube(0, 0.025, -0.02, 0.55, 0.018, 1.35, '#0e1c24');
+        } else {
+          actor.cube(0.29, 0.23, -0.08, 0.04, 0.45, 0.04, '#7a8882', 'metal', [0, 0, -0.4]);
+        }
+        actor.build();
+        return { actor, wheels, parked, phase: random() };
+      }
+      const scooterPath = new THREE.CatmullRomCurve3([
+        vec(-0.35, 0, 9.15), vec(-1.7, 0, 6.5), vec(-1.67, 0, 0.6), vec(-1.2, 0, -5.35),
+        vec(0.2, 0, -6.65), vec(1.65, 0, -4.5), vec(1.72, 0, 3.9), vec(0.9, 0, 8.95)
+      ], true, 'catmullrom', 0.16);
+      for (let i = 0; i < 3; i++) scooters.push(scooter(`scooter-${i}`, ['#3a9b98', '#c75845', '#d4a24f'][i]));
+      const parkedA = scooter('parked-scooter-a', '#4b9990', true);
+      parkedA.actor.group.position.set(10.0, 0.065, 8.5);
+      parkedA.actor.group.rotation.y = -0.6;
+      const parkedB = scooter('parked-scooter-b', '#bc5b48', true);
+      parkedB.actor.group.position.set(-5.05, 0.065, 9.0);
+      parkedB.actor.group.rotation.y = 0.8;
+
+      function alphaVoxelMaterial(tint, opacity, key) {
+        const material = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity, depthWrite: false });
+        material.onBeforeCompile = shader => {
+          shader.vertexShader = 'attribute float aAlpha; varying float vVoxelAlpha;\n' + shader.vertexShader;
+          shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvVoxelAlpha = aAlpha;');
+          shader.fragmentShader = 'varying float vVoxelAlpha;\n' + shader.fragmentShader;
+          shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vVoxelAlpha;');
+        };
+        material.customProgramCacheKey = () => key;
+        return material;
+      }
+      const steamCount = steamSources.length * 20 + smokeSources.length * 16 + 24;
+      const steamGeometry = cube.clone();
+      const steamAlpha = new THREE.InstancedBufferAttribute(new Float32Array(steamCount), 1);
+      steamAlpha.setUsage(THREE.DynamicDrawUsage);
+      steamGeometry.setAttribute('aAlpha', steamAlpha);
+      const steamMesh = new THREE.InstancedMesh(steamGeometry, alphaVoxelMaterial('#d3e1d8', 0.14, 'steam-v1'), steamCount);
+      steamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      steamMesh.frustumCulled = false;
+      steamMesh.renderOrder = 4;
+      scene.add(steamMesh);
+      const steamParticles = [];
+      for (const [index, source] of steamSources.entries()) {
+        for (let i = 0; i < 20; i++) steamParticles.push({ source, phase: i / 20 + random() * 0.035, sway: range(1, 4), seed: random(), smoke: false, speed: index % 2 ? 0.16 : 0.2 });
+      }
+      for (const source of smokeSources) for (let i = 0; i < 16; i++) steamParticles.push({ source, phase: i / 16, sway: range(1, 3), seed: random(), smoke: true, speed: 0.13 });
+      for (let i = 0; i < 24; i++) steamParticles.push({ source: vec(-9.2, 8.7, -1.8), phase: i / 24, sway: 2, seed: random(), smoke: true, speed: 0.1 });
+      const steamDark = new THREE.Color('#5b707b');
+      const steamLight = new THREE.Color('#d0ddd4');
+
+      const dripCount = 54;
+      const dripMesh = new THREE.InstancedMesh(cube, new THREE.MeshBasicMaterial({ color: '#8eb5c8', transparent: true, opacity: 0.23, depthWrite: false }), dripCount);
+      dripMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      dripMesh.frustumCulled = false;
+      scene.add(dripMesh);
+      const drips = Array.from({ length: dripCount }, (_, i) => ({ x: (i % 2 ? 1 : -1) * range(3.15, 3.45), z: range(-5.5, 6.0), phase: random(), height: range(2.5, 3.0) }));
+      const rippleMesh = new THREE.InstancedMesh(cube, new THREE.MeshBasicMaterial({ color: '#8fa8af', transparent: true, opacity: 0.16, depthWrite: false }), 56);
+      rippleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      rippleMesh.frustumCulled = false;
+      scene.add(rippleMesh);
+      const emberMesh = new THREE.InstancedMesh(cube, new THREE.MeshBasicMaterial({ color: color('#ffb24e').clone().multiplyScalar(2), toneMapped: false }), 20);
+      emberMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      emberMesh.frustumCulled = false;
+      scene.add(emberMesh);
+
+      function updateLife(time) {
+        for (const walker of walkers) {
+          const { rig } = walker;
+          if (!walker.stationary) {
+            const path = walker.path || walkingPath;
+            const u = wrap(walker.phase + time / LOOP_SECONDS * walker.speed);
+            const p = path.getPointAt(u);
+            const tangent = path.getTangentAt(u);
+            rig.actor.group.position.x = p.x;
+            rig.actor.group.position.z = p.z;
+            rig.actor.group.rotation.y = Math.atan2(tangent.x, tangent.z);
+          }
+          animatePerson(rig, time, !walker.stationary);
+        }
+        for (let i = 0; i < scooters.length; i++) {
+          const scooter = scooters[i];
+          const u = wrap(scooter.phase + time / LOOP_SECONDS);
+          const p = scooterPath.getPointAt(u);
+          const tangent = scooterPath.getTangentAt(u);
+          scooter.actor.group.position.set(p.x, 0.075 + Math.sin(time * 8.377 + i) * 0.009, p.z);
+          scooter.actor.group.rotation.set(0, Math.atan2(tangent.x, tangent.z), Math.sin(u * TAU * 2) * 0.045);
+          for (const wheel of scooter.wheels) wheel.rotation[0] = -time * 10.472;
+          scooter.actor.update();
+        }
+        for (let i = 0; i < steamParticles.length; i++) {
+          const particle = steamParticles[i];
+          const age = wrap(particle.phase + time * particle.speed);
+          const visibility = Math.pow(Math.sin(age * Math.PI), 1.4);
+          const size = (0.10 + age * 0.47) * Math.max(0.08, visibility);
+          const drift = particle.smoke ? 0.85 : 0.4;
+          matrixObject.position.set(
+            particle.source.x + Math.sin(age * 4.5 + particle.seed * TAU) * age * 0.3 + age * drift,
+            particle.source.y + age * (particle.smoke ? 2.65 : 2.05),
+            particle.source.z + Math.cos(age * particle.sway + particle.seed * 3) * age * 0.24
+          );
+          matrixObject.rotation.set(age * 0.7, particle.seed * 3 + age, age * 0.35);
+          matrixObject.scale.set(size * 1.15, size * 0.83, size);
+          matrixObject.updateMatrix();
+          steamMesh.setMatrixAt(i, matrixObject.matrix);
+          steamMesh.setColorAt(i, particle.smoke ? steamDark : steamLight);
+          steamAlpha.setX(i, visibility * (particle.smoke ? 0.45 : 1));
+        }
+        steamMesh.instanceMatrix.needsUpdate = true;
+        steamMesh.instanceColor.needsUpdate = true;
+        steamAlpha.needsUpdate = true;
+        for (let i = 0; i < dripCount; i++) {
+          const drip = drips[i];
+          const age = wrap(drip.phase + time * 0.8);
+          matrixObject.position.set(drip.x, 0.12 + age * drip.height, drip.z);
+          matrixObject.rotation.set(0, 0, 0);
+          matrixObject.scale.set(0.013, 0.085, 0.013);
+          matrixObject.updateMatrix();
+          dripMesh.setMatrixAt(i, matrixObject.matrix);
+        }
+        dripMesh.instanceMatrix.needsUpdate = true;
+        for (let i = 0; i < 14; i++) {
+          const age = wrap(i / 14 + time / 3);
+          const radius = 0.06 + age * 0.53;
+          const opacity = Math.max(0.001, 1 - age);
+          const x = Math.sin(i * 12.37) * 2.1;
+          const z = wrap(i * 3.71, 14) - 5.4;
+          for (let side = 0; side < 4; side++) {
+            matrixObject.position.set(x + (side < 2 ? (side ? 1 : -1) * radius : 0), 0.066, z + (side >= 2 ? (side === 3 ? 1 : -1) * radius : 0));
+            matrixObject.rotation.set(0, 0, 0);
+            matrixObject.scale.set(side < 2 ? 0.012 : radius * 2, 0.006, side < 2 ? radius * 2 : 0.012);
+            matrixObject.updateMatrix();
+            const index = i * 4 + side;
+            rippleMesh.setMatrixAt(index, matrixObject.matrix);
+            rippleMesh.setColorAt(index, new THREE.Color(opacity, opacity, opacity));
+          }
+        }
+        rippleMesh.instanceMatrix.needsUpdate = true;
+        rippleMesh.instanceColor.needsUpdate = true;
+        for (let i = 0; i < 20; i++) {
+          const age = wrap(i / 20 + time / 2);
+          const size = Math.sin(age * Math.PI) * 0.033;
+          matrixObject.position.set(4.23 + Math.sin(i * 5.3 + age * 3) * age * 0.33, 1.7 + age * 1.45, -4.0 + Math.cos(i * 3.5 + age * 2) * age * 0.33);
+          matrixObject.rotation.set(age * 3, age * 2, 0);
+          matrixObject.scale.setScalar(Math.max(0.001, size));
+          matrixObject.updateMatrix();
+          emberMesh.setMatrixAt(i, matrixObject.matrix);
+        }
+        emberMesh.instanceMatrix.needsUpdate = true;
+        for (const flicker of flickers) {
+          const wave = Math.sin(time * TAU / 30 * 67 + flicker.phase) * Math.sin(time * TAU / 30 * 113 + flicker.phase * 4);
+          const dip = wave > 0.93 ? 0.58 : 1;
+          flicker.material.color.copy(flicker.base).multiplyScalar((0.96 + 0.04 * Math.sin(time * TAU / 30 * 23 + flicker.phase)) * dip);
+        }
+      }
+
+      const cameraPoints = [
+        vec(29, 24, 36), vec(13, 10.5, 21), vec(2.0, 3.25, 10.3), vec(-0.75, 2.7, 3.5),
+        vec(0.3, 3.15, -0.4), vec(0, 8.0, -5.5), vec(-10, 11, 8), vec(-19, 15, 19),
+        vec(-9, 26, 34), vec(15, 26, 35)
+      ];
+      const targetPoints = [
+        vec(0, 6.5, 0), vec(0, 3.0, 1), vec(0, 2.0, 0), vec(3.5, 1.65, 0.1),
+        vec(-3.4, 2.1, -3.2), vec(1.0, 6.0, -9), vec(0, 3.0, 0), vec(0, 5.0, 0),
+        vec(0, 6.0, 0), vec(0, 6.0, 0)
+      ];
+      const cameraPath = new THREE.CatmullRomCurve3(cameraPoints, true, 'centripetal');
+      const targetPath = new THREE.CatmullRomCurve3(targetPoints, true, 'centripetal');
+      const cameraTarget = new THREE.Vector3();
+      const fovs = [49, 47, 55, 56, 55, 52, 49, 49, 49, 49];
+      function cameraAt(time) {
+        const u = wrap(time / LOOP_SECONDS);
+        const position = cameraPath.getPoint(u);
+        const target = targetPath.getPoint(u);
+        const segment = Math.floor(u * fovs.length);
+        const blend = wrap(u * fovs.length);
+        const eased = blend * blend * (3 - 2 * blend);
+        const fov = THREE.MathUtils.lerp(fovs[segment], fovs[(segment + 1) % fovs.length], eased);
+        return { position, target, fov };
+      }
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.065;
+      controls.rotateSpeed = 0.55;
+      controls.panSpeed = 0.65;
+      controls.minDistance = 3;
+      controls.maxDistance = 75;
+      controls.minPolarAngle = 0.15;
+      controls.maxPolarAngle = Math.PI * 0.485;
+      controls.target.set(0, 3, 0);
+      controls.enabled = false;
+      let mode = 'cinematic';
+      const orbitHelp = document.getElementById('orbit-help');
+      function setCamera(time) {
+        const pose = cameraAt(time);
+        camera.position.copy(pose.position);
+        cameraTarget.copy(pose.target);
+        camera.fov = pose.fov;
+        camera.updateProjectionMatrix();
+        camera.lookAt(cameraTarget);
+      }
+      function toggleCamera() {
+        if (mode === 'cinematic') {
+          mode = 'orbit';
+          const direction = new THREE.Vector3();
+          camera.getWorldDirection(direction);
+          controls.target.copy(camera.position).addScaledVector(direction, 8);
+          controls.enabled = true;
+          controls.update();
+          orbitHelp.classList.add('visible');
+          orbitHelp.setAttribute('aria-hidden', 'false');
+        } else {
+          mode = 'cinematic';
+          controls.enabled = false;
+          orbitHelp.classList.remove('visible');
+          orbitHelp.setAttribute('aria-hidden', 'true');
+        }
+      }
+      window.addEventListener('keydown', event => {
+        if (event.code === 'KeyC' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          toggleCamera();
+        }
+      });
+
+      const renderTarget = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: Math.min(4, renderer.capabilities.maxSamples) });
+      const composer = new EffectComposer(renderer, renderTarget);
+      composer.addPass(new RenderPass(scene, camera));
+      const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.53, 0.64, 1.0);
+      composer.addPass(bloom);
+      const grade = new ShaderPass({
+        uniforms: { tDiffuse: { value: null } },
+        vertexShader: `varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+          void main() {
+            vec3 c = texture2D(tDiffuse, vUv).rgb;
+            float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            c = mix(vec3(luminance), c, 1.075);
+            vec2 q = (vUv - 0.5) * vec2(1.0, 0.86);
+            c *= 1.0 - smoothstep(0.24, 0.69, length(q)) * 0.32;
+            gl_FragColor = vec4(max(c, 0.0), 1.0);
+          }`
+      });
+      composer.addPass(grade);
+      composer.addPass(new OutputPass());
+
+      window.addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        composer.setSize(innerWidth, innerHeight);
+      });
+      renderer.domElement.addEventListener('webglcontextlost', event => {
+        event.preventDefault();
+        document.getElementById('failure').style.display = 'grid';
+      });
+
+      let elapsed = 0;
+      let previous = performance.now();
+      let frozenTime = null;
+      let frameMilliseconds = 16.7;
+      let frames = 0;
+      let ready = false;
+      function draw(time) {
+        clockUniform.value = time;
+        updateLife(time);
+        if (mode === 'cinematic') setCamera(time);
+        else controls.update();
+        composer.render();
+        frames++;
+      }
+      setCamera(0);
+      updateLife(0);
+      composer.render();
+      ready = true;
+      function animate(now) {
+        requestAnimationFrame(animate);
+        const delta = Math.max(0, (now - previous) / 1000);
+        previous = now;
+        if (delta > 0 && delta < 1) {
+          frameMilliseconds = frameMilliseconds * 0.95 + delta * 1000 * 0.05;
+          if (frozenTime === null) elapsed += delta;
+        }
+        const time = frozenTime ?? elapsed;
+        if (!document.hidden) draw(time);
+      }
+      requestAnimationFrame(animate);
+
+      window.__market = Object.freeze({
+        get ready() { return ready; },
+        getState: () => ({
+          ready, mode, elapsed, loopTime: wrap(elapsed, LOOP_SECONDS), period: LOOP_SECONDS, frames,
+          frameMilliseconds, drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+          staticVoxels: staticVoxelCount, dynamicVoxels: dynamicVoxelCount, actors: actors.length,
+          camera: { position: camera.position.toArray(), target: cameraTarget.toArray(), fov: camera.fov },
+          hintVisible: orbitHelp.classList.contains('visible'), pixelRatio: renderer.getPixelRatio(),
+          viewport: [innerWidth, innerHeight]
+        }),
+        seek: seconds => {
+          frozenTime = Number(seconds) || 0;
+          draw(frozenTime);
+          return window.__market.getState();
+        },
+        resume: () => { elapsed = frozenTime ?? elapsed; frozenTime = null; previous = performance.now(); },
+        cameraAt: seconds => {
+          const pose = cameraAt(seconds);
+          return { position: pose.position.toArray(), target: pose.target.toArray(), fov: pose.fov };
+        },
+        checkCamera: () => {
+          const hits = [];
+          let minimumTargetDistance = Infinity;
+          for (let i = 0; i <= 1500; i++) {
+            const time = i / 1500 * LOOP_SECONDS;
+            const pose = cameraAt(time);
+            minimumTargetDistance = Math.min(minimumTargetDistance, pose.position.distanceTo(pose.target));
+            obstacles.forEach((bounds, index) => {
+              if (bounds.containsPoint(pose.position)) hits.push({ time, obstacle: index });
+            });
+          }
+          const start = cameraAt(0), end = cameraAt(LOOP_SECONDS);
+          return { hits, minimumTargetDistance, seamPositionError: start.position.distanceTo(end.position), seamTargetError: start.target.distanceTo(end.target), geometryTypes: [...new Set(scene.children.filter(o => o.isMesh).map(o => o.geometry.type))] };
+        }
+      });
+    } catch (error) {
+      console.error('The night market could not start:', error);
+      document.getElementById('failure').style.display = 'grid';
+    }
+  </script>
+  <script>
+    window.addEventListener('error', function (event) {
+      if (event.message && /WebGL|module|fetch|network/i.test(event.message)) document.getElementById('failure').style.display = 'grid';
+    });
+  </script>
+</body>
+</html>

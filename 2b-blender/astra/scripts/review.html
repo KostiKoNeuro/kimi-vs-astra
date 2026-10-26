@@ -1,0 +1,5 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Shenzhen — final film review</title>
+<style>body{margin:0;background:#08151c;color:#e4ccb0;font:14px monospace;display:grid;place-items:center;min-height:100vh}main{width:min(100vw,1920px)}video{display:block;width:100%;max-height:90vh;background:#08151c}button{padding:12px 20px;background:#d2b18b;color:#0c2028;border:0;cursor:pointer}p{padding:0 20px}</style></head><body><main>
+<video controls preload="auto" playsinline src="../render/flythrough.mp4"></video>
+<p><button onclick="const v=document.querySelector('video');v.playbackRate=1;v.currentTime=0;v.play()">PLAY FULL 10-SECOND FILM</button> <button onclick="const v=document.querySelector('video');v.playbackRate=.25;v.currentTime=0;v.play()">REVIEW AT QUARTER SPEED</button> <span id="status">1920 × 1080 · H.264 · 24 fps · 240 frames</span></p>
+</main><script>const v=document.querySelector('video');v.addEventListener('ended',()=>document.querySelector('#status').textContent='FULL FILM PLAYBACK COMPLETE');v.addEventListener('error',()=>document.querySelector('#status').textContent='VIDEO ERROR');</script></body></html>
